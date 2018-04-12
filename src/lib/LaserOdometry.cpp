@@ -171,7 +171,7 @@ bool LaserOdometry::setup(ros::NodeHandle &node,
 
 void LaserOdometry::transformToStart(const pcl::PointXYZI& pi, pcl::PointXYZI& po)
 {
-  float s = 10 * (pi.intensity - int(pi.intensity));
+  float s = 10 * (pi.intensity - int(pi.intensity)); //msy: why need to use s to scale the transform back to Start?
 
   po.x = pi.x - s * _transform.pos.x();
   po.y = pi.y - s * _transform.pos.y();
@@ -472,12 +472,14 @@ void LaserOdometry::process()
   Eigen::Matrix<float,6,6> matP;
 
   _frameCount++;
-  _transform.pos -= _imuVeloFromStart * _scanPeriod;
+  _transform.pos -= _imuVeloFromStart * _scanPeriod; //msy: _scanPeriod is fetched from Param in setup().
 
 
   size_t lastCornerCloudSize = _lastCornerCloud->points.size();
   size_t lastSurfaceCloudSize = _lastSurfaceCloud->points.size();
 
+
+  // msy: make sure sufficient features are used
   if (lastCornerCloudSize > 10 && lastSurfaceCloudSize > 100) {
     std::vector<int> pointSearchInd(1);
     std::vector<float> pointSearchSqDis(1);
@@ -487,37 +489,45 @@ void LaserOdometry::process()
     size_t cornerPointsSharpNum = _cornerPointsSharp->points.size();
     size_t surfPointsFlatNum = _surfPointsFlat->points.size();
 
+
     _pointSearchCornerInd1.resize(cornerPointsSharpNum);
     _pointSearchCornerInd2.resize(cornerPointsSharpNum);
     _pointSearchSurfInd1.resize(surfPointsFlatNum);
     _pointSearchSurfInd2.resize(surfPointsFlatNum);
     _pointSearchSurfInd3.resize(surfPointsFlatNum);
 
+    //msy: iteration for optimization problem
     for (size_t iterCount = 0; iterCount < _maxIterations; iterCount++) {
       pcl::PointXYZI pointSel, pointProj, tripod1, tripod2, tripod3;
       _laserCloudOri->clear();
       _coeffSel->clear();
 
+      //msy: corner data process?
       for (int i = 0; i < cornerPointsSharpNum; i++) {
-        transformToStart(_cornerPointsSharp->points[i], pointSel);
+        transformToStart(_cornerPointsSharp->points[i], pointSel); //msy: transfer new scan corner data to Tk+1
 
+        //msy: for every 5 iteration, do this
         if (iterCount % 5 == 0) {
           pcl::removeNaNFromPointCloud(*_lastCornerCloud, *_lastCornerCloud, indices);
-          _lastCornerKDTree.nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);
+          _lastCornerKDTree.nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);//msy: ??
 
           int closestPointInd = -1, minPointInd2 = -1;
+          //msy: not consider points too far away
           if (pointSearchSqDis[0] < 25) {
             closestPointInd = pointSearchInd[0];
-            int closestPointScan = int(_lastCornerCloud->points[closestPointInd].intensity);
+              //msy: intensity of lastCornerCloud closest pint
+            int closestPointScan = int(_lastCornerCloud->points[closestPointInd].intensity); 
 
             float pointSqDis, minPointSqDis2 = 25;
+            //msy: find the closest point j in the lastCornerCloud to point i in new cornor point cloud
+            //msy: larger intensity
             for (int j = closestPointInd + 1; j < cornerPointsSharpNum; j++) {
               if (int(_lastCornerCloud->points[j].intensity) > closestPointScan + 2.5) {
                 break;
               }
 
               pointSqDis = calcSquaredDiff(_lastCornerCloud->points[j], pointSel);
-
+              //msy: why use intensity?
               if (int(_lastCornerCloud->points[j].intensity) > closestPointScan) {
                 if (pointSqDis < minPointSqDis2) {
                   minPointSqDis2 = pointSqDis;
@@ -525,6 +535,8 @@ void LaserOdometry::process()
                 }
               }
             }
+            //msy: find the closest point j in the lastCornerCloud to point i in new cornor point cloud
+            //msy: smaller intensity
             for (int j = closestPointInd - 1; j >= 0; j--) {
               if (int(_lastCornerCloud->points[j].intensity) < closestPointScan - 2.5) {
                 break;
@@ -539,17 +551,19 @@ void LaserOdometry::process()
                 }
               }
             }
-          }
+          }//msy: END. for every 5 iteration, do above
 
-          _pointSearchCornerInd1[i] = closestPointInd;
-          _pointSearchCornerInd2[i] = minPointInd2;
+
+          _pointSearchCornerInd1[i] = closestPointInd; //msy: from _lastCornerKDTree.nearestKSearch()
+          _pointSearchCornerInd2[i] = minPointInd2;    //msy: from intensity condition 
         }
 
+        //msy: if found a point from intensity condition. otherwise _pointSearchCornerInd2[i] = -1 (int closestPointInd = -1, minPointInd2 = -1;)
         if (_pointSearchCornerInd2[i] >= 0) {
-          tripod1 = _lastCornerCloud->points[_pointSearchCornerInd1[i]];
-          tripod2 = _lastCornerCloud->points[_pointSearchCornerInd2[i]];
+          tripod1 = _lastCornerCloud->points[_pointSearchCornerInd1[i]]; //msy: _lastCornerKDTree.nearestKSearch
+          tripod2 = _lastCornerCloud->points[_pointSearchCornerInd2[i]]; //msy: intensity condition 
 
-          float x0 = pointSel.x;
+          float x0 = pointSel.x;    //msy: pointSel is point i of new corner data
           float y0 = pointSel.y;
           float z0 = pointSel.z;
           float x1 = tripod1.x;
@@ -559,15 +573,17 @@ void LaserOdometry::process()
           float y2 = tripod2.y;
           float z2 = tripod2.z;
 
+            //msy: cha multiply
           float a012 = sqrt(((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
                             * ((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
                             + ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))
                               * ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))
                             + ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1))
                               * ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1)));
-
+            //msy: distance of tripod1 and tripod2
           float l12 = sqrt((x1 - x2)*(x1 - x2) + (y1 - y2)*(y1 - y2) + (z1 - z2)*(z1 - z2));
 
+          //msu: ???
           float la = ((y1 - y2)*((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
                       + (z1 - z2)*((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))) / a012 / l12;
 
@@ -595,13 +611,15 @@ void LaserOdometry::process()
           coeff.z = s * lc;
           coeff.intensity = s * ld2;
 
+          //msy: if converge ?
           if (s > 0.1 && ld2 != 0) {
-            _laserCloudOri->push_back(_cornerPointsSharp->points[i]);
+            _laserCloudOri->push_back(_cornerPointsSharp->points[i]); 
             _coeffSel->push_back(coeff);
           }
         }
-      }
+      }//msy: END. corner data process
 
+      //msy: surface data process
       for (int i = 0; i < surfPointsFlatNum; i++) {
         transformToStart(_surfPointsFlat->points[i], pointSel);
 
@@ -700,9 +718,12 @@ void LaserOdometry::process()
             _coeffSel->push_back(coeff);
           }
         }
-      }
+      }//msy: END. surface data process
 
-      int pointSelNum = _laserCloudOri->points.size();
+
+
+      //msy: after converged and find enough correspondances, compute transformation?
+      int pointSelNum = _laserCloudOri->points.size(); //msy: feature number
       if (pointSelNum < 10) {
         continue;
       }
