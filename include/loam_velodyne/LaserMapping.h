@@ -136,11 +136,6 @@ public:
 
 
 protected:
-  /** \brief Reset flags, etc. */
-  void reset();
-
-  /** \brief Check if all required information for a new processing step is available. */
-  bool hasNewData();
 
   /** Run an optimization. */
   void optimizeTransformTobeMapped();
