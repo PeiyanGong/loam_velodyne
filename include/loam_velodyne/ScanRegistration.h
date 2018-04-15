@@ -222,7 +222,16 @@ protected:
    */
   void extractFeatures(const uint16_t& beginIdx = 0);
 
-  
+  /** \brief Extract features from current laser region.
+   *
+   */
+  void extractRegionFeatures(const size_t& regionSize,
+                             const size_t& scanStartIdx,
+                             const size_t& scanEndIdx,
+                             const size_t& regionStartIdx,
+                             const size_t& regionEndIdx,
+                             const pcl::PointCloud<pcl::PointXYZI>::Ptr& surfPointsLessFlatScan);
+
 
   /** \brief Set up region buffers for the specified point range.
    *
