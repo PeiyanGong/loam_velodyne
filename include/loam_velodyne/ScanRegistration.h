@@ -222,6 +222,8 @@ protected:
    */
   void extractFeatures(const uint16_t& beginIdx = 0);
 
+  
+
   /** \brief Set up region buffers for the specified point range.
    *
    * @param startIdx the region start index

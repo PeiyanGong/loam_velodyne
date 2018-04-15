@@ -341,12 +341,6 @@ void ScanRegistration::extractFeatures(const uint16_t& beginIdx)
       continue;
     }
 
-    // Quick&Dirty fix for relative point time calculation without IMU data
-    /*float scanSize = scanEndIdx - scanStartIdx + 1;
-    for (int j = scanStartIdx; j <= scanEndIdx; j++) {
-      _laserCloud[j].intensity = i + _scanPeriod * (j - scanStartIdx) / scanSize;
-    }*/
-
     // reset scan buffers
     setScanBuffersFor(scanStartIdx, scanEndIdx);
 
@@ -366,7 +360,6 @@ void ScanRegistration::extractFeatures(const uint16_t& beginIdx)
 
       // reset region buffers
       setRegionBuffersFor(sp, ep);
-
 
       // extract corner features
       int largestPickedNum = 0;
