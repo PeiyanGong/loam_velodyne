@@ -2,7 +2,7 @@
 
 Sample map built from [Kitti Raw Data Sequence 05](http://kitti.is.tue.mpg.de/kitti/raw_data/2011_09_30_drive_0018/2011_09_30_drive_0018_sync.zip)
 
-:white_check_mark: Tested with ROS Kinetic Running on Ubuntu 16.04, Velodyne VLP16. [(Screencast)](https://youtu.be/o1cLXY-Es54)
+:white_check_mark: Tested with ROS Kinetic Running on Ubuntu 16.04, Velodyne VLP16.
 
 All sources were taken from [ROS documentation](http://docs.ros.org/indigo/api/loam_velodyne/html/files.html)
 
