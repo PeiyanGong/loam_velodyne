@@ -72,9 +72,11 @@ LaserOdometry::LaserOdometry(const float& scanPeriod,
 {
   // initialize odometry and odometry tf messages
   _laserOdometryMsg.header.frame_id = "/camera_init";
+  // Publish child_frame id here
   _laserOdometryMsg.child_frame_id = "/laser_odom";
 
   _laserOdometryTrans.frame_id_ = "/camera_init";
+  // Publish chile_frame id
   _laserOdometryTrans.child_frame_id_ = "/laser_odom";
 }
 
@@ -167,7 +169,7 @@ bool LaserOdometry::setup(ros::NodeHandle &node,
   return true;
 }
 
-
+// Transform
 
 void LaserOdometry::transformToStart(const pcl::PointXYZI& pi, pcl::PointXYZI& po)
 {
@@ -184,7 +186,7 @@ void LaserOdometry::transformToStart(const pcl::PointXYZI& pi, pcl::PointXYZI& p
   rotateZXY(po, rz, rx, ry);
 }
 
-
+//
 
 size_t LaserOdometry::transformToEnd(pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud)
 {
@@ -362,7 +364,7 @@ void LaserOdometry::laserCloudLessFlatHandler(const sensor_msgs::PointCloud2Cons
 }
 
 
-
+// Full pointcloud
 void LaserOdometry::laserCloudFullResHandler(const sensor_msgs::PointCloud2ConstPtr& laserCloudFullResMsg)
 {
   _timeLaserCloudFullRes = laserCloudFullResMsg->header.stamp;
@@ -456,7 +458,7 @@ void LaserOdometry::process()
   if (!_systemInited) {
     _cornerPointsLessSharp.swap(_lastCornerCloud);
     _surfPointsLessFlat.swap(_lastSurfaceCloud);
-
+    // Initiate KD tree for edge and surf here
     _lastCornerKDTree.setInputCloud(_lastCornerCloud);
     _lastSurfaceKDTree.setInputCloud(_lastSurfaceCloud);
 
@@ -472,6 +474,7 @@ void LaserOdometry::process()
   Eigen::Matrix<float,6,6> matP;
 
   _frameCount++;
+  // _transform is defined here
   _transform.pos -= _imuVeloFromStart * _scanPeriod;
 
 
@@ -494,211 +497,72 @@ void LaserOdometry::process()
     _pointSearchSurfInd3.resize(surfPointsFlatNum);
 
     for (size_t iterCount = 0; iterCount < _maxIterations; iterCount++) {
-      pcl::PointXYZI pointSel, pointProj, tripod1, tripod2, tripod3;
+      pcl::PointXYZI pointSel;
       _laserCloudOri->clear();
       _coeffSel->clear();
 
       for (int i = 0; i < cornerPointsSharpNum; i++) {
+        // Looping through all corner points
         transformToStart(_cornerPointsSharp->points[i], pointSel);
-
+        int num_pt = 1;
         if (iterCount % 5 == 0) {
+          // Find nearest correspondence with nearest KD tree search 
           pcl::removeNaNFromPointCloud(*_lastCornerCloud, *_lastCornerCloud, indices);
           _lastCornerKDTree.nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);
 
-          int closestPointInd = -1, minPointInd2 = -1;
+          // Two edge features index search
+          int closestPointInd = -1;
+          std::vector<int> result(num_pt,-1);;
           if (pointSearchSqDis[0] < 25) {
+            // First coorespondence index
             closestPointInd = pointSearchInd[0];
+            // Extract scan id from intensity
             int closestPointScan = int(_lastCornerCloud->points[closestPointInd].intensity);
 
-            float pointSqDis, minPointSqDis2 = 25;
-            for (int j = closestPointInd + 1; j < cornerPointsSharpNum; j++) {
-              if (int(_lastCornerCloud->points[j].intensity) > closestPointScan + 2.5) {
-                break;
-              }
-
-              pointSqDis = calcSquaredDiff(_lastCornerCloud->points[j], pointSel);
-
-              if (int(_lastCornerCloud->points[j].intensity) > closestPointScan) {
-                if (pointSqDis < minPointSqDis2) {
-                  minPointSqDis2 = pointSqDis;
-                  minPointInd2 = j;
-                }
-              }
-            }
-            for (int j = closestPointInd - 1; j >= 0; j--) {
-              if (int(_lastCornerCloud->points[j].intensity) < closestPointScan - 2.5) {
-                break;
-              }
-
-              pointSqDis = calcSquaredDiff(_lastCornerCloud->points[j], pointSel);
-
-              if (int(_lastCornerCloud->points[j].intensity) < closestPointScan) {
-                if (pointSqDis < minPointSqDis2) {
-                  minPointSqDis2 = pointSqDis;
-                  minPointInd2 = j;
-                }
-              }
-            }
-          }
+            // search following index to get the nearest correspondence (corner)
+            // Start
+            result = Findnearest(pointSel,closestPointInd,closestPointScan,cornerPointsSharpNum,num_pt);
+          } // End of (if (pointSearchSqDis[0] < 25))
 
           _pointSearchCornerInd1[i] = closestPointInd;
-          _pointSearchCornerInd2[i] = minPointInd2;
+          _pointSearchCornerInd2[i] = result[0];
         }
 
+        // Start calculating Transformation
+        // Corners :
         if (_pointSearchCornerInd2[i] >= 0) {
-          tripod1 = _lastCornerCloud->points[_pointSearchCornerInd1[i]];
-          tripod2 = _lastCornerCloud->points[_pointSearchCornerInd2[i]];
-
-          float x0 = pointSel.x;
-          float y0 = pointSel.y;
-          float z0 = pointSel.z;
-          float x1 = tripod1.x;
-          float y1 = tripod1.y;
-          float z1 = tripod1.z;
-          float x2 = tripod2.x;
-          float y2 = tripod2.y;
-          float z2 = tripod2.z;
-
-          float a012 = sqrt(((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
-                            * ((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
-                            + ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))
-                              * ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))
-                            + ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1))
-                              * ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1)));
-
-          float l12 = sqrt((x1 - x2)*(x1 - x2) + (y1 - y2)*(y1 - y2) + (z1 - z2)*(z1 - z2));
-
-          float la = ((y1 - y2)*((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
-                      + (z1 - z2)*((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))) / a012 / l12;
-
-          float lb = -((x1 - x2)*((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
-                       - (z1 - z2)*((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1))) / a012 / l12;
-
-          float lc = -((x1 - x2)*((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))
-                       + (y1 - y2)*((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1))) / a012 / l12;
-
-          float ld2 = a012 / l12;
-
-          // TODO: Why writing to a variable that's never read?
-          pointProj = pointSel;
-          pointProj.x -= la * ld2;
-          pointProj.y -= lb * ld2;
-          pointProj.z -= lc * ld2;
-
-          float s = 1;
-          if (iterCount >= 5) {
-            s = 1 - 1.8f * fabs(ld2);
-          }
-
-          coeff.x = s * la;
-          coeff.y = s * lb;
-          coeff.z = s * lc;
-          coeff.intensity = s * ld2;
-
-          if (s > 0.1 && ld2 != 0) {
-            _laserCloudOri->push_back(_cornerPointsSharp->points[i]);
-            _coeffSel->push_back(coeff);
-          }
+          // Start
+          coeff = Solvejacobian(pointSel,i,iterCount,num_pt);
         }
       }
-
+      // Solve jacobian for surf points
       for (int i = 0; i < surfPointsFlatNum; i++) {
+        // Apply proposed transformation to the new linearlization point
+        // pointsel is the new linearization point
         transformToStart(_surfPointsFlat->points[i], pointSel);
-
+        int num_pt = 2;
         if (iterCount % 5 == 0) {
+          // Search for the nearest neighbor with KD tree
           _lastSurfaceKDTree.nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);
-          int closestPointInd = -1, minPointInd2 = -1, minPointInd3 = -1;
+          // Three points are required for a surface
+          int closestPointInd = -1;
+          // Squared distance threshold is 25
+          std::vector<int> result(num_pt,-1);;
           if (pointSearchSqDis[0] < 25) {
             closestPointInd = pointSearchInd[0];
             int closestPointScan = int(_lastSurfaceCloud->points[closestPointInd].intensity);
-
-            float pointSqDis, minPointSqDis2 = 25, minPointSqDis3 = 25;
-            for (int j = closestPointInd + 1; j < surfPointsFlatNum; j++) {
-              if (int(_lastSurfaceCloud->points[j].intensity) > closestPointScan + 2.5) {
-                break;
-              }
-
-              pointSqDis = calcSquaredDiff(_lastSurfaceCloud->points[j], pointSel);
-
-              if (int(_lastSurfaceCloud->points[j].intensity) <= closestPointScan) {
-                if (pointSqDis < minPointSqDis2) {
-                  minPointSqDis2 = pointSqDis;
-                  minPointInd2 = j;
-                }
-              } else {
-                if (pointSqDis < minPointSqDis3) {
-                  minPointSqDis3 = pointSqDis;
-                  minPointInd3 = j;
-                }
-              }
-            }
-            for (int j = closestPointInd - 1; j >= 0; j--) {
-              if (int(_lastSurfaceCloud->points[j].intensity) < closestPointScan - 2.5) {
-                break;
-              }
-
-              pointSqDis = calcSquaredDiff(_lastSurfaceCloud->points[j], pointSel);
-
-              if (int(_lastSurfaceCloud->points[j].intensity) >= closestPointScan) {
-                if (pointSqDis < minPointSqDis2) {
-                  minPointSqDis2 = pointSqDis;
-                  minPointInd2 = j;
-                }
-              } else {
-                if (pointSqDis < minPointSqDis3) {
-                  minPointSqDis3 = pointSqDis;
-                  minPointInd3 = j;
-                }
-              }
-            }
-          }
+            // Search for nearest feature points in following points (surf)
+            result = Findnearest(pointSel,closestPointInd,closestPointScan,surfPointsFlatNum,num_pt);
+          } // End of (if (pointSearchSqDis[0] < 25))
 
           _pointSearchSurfInd1[i] = closestPointInd;
-          _pointSearchSurfInd2[i] = minPointInd2;
-          _pointSearchSurfInd3[i] = minPointInd3;
+          _pointSearchSurfInd2[i] = result[0];
+          _pointSearchSurfInd3[i] = result[1];
         }
-
+        // solve jacobian for surf
         if (_pointSearchSurfInd2[i] >= 0 && _pointSearchSurfInd3[i] >= 0) {
-          tripod1 = _lastSurfaceCloud->points[_pointSearchSurfInd1[i]];
-          tripod2 = _lastSurfaceCloud->points[_pointSearchSurfInd2[i]];
-          tripod3 = _lastSurfaceCloud->points[_pointSearchSurfInd3[i]];
-
-          float pa = (tripod2.y - tripod1.y) * (tripod3.z - tripod1.z)
-                     - (tripod3.y - tripod1.y) * (tripod2.z - tripod1.z);
-          float pb = (tripod2.z - tripod1.z) * (tripod3.x - tripod1.x)
-                     - (tripod3.z - tripod1.z) * (tripod2.x - tripod1.x);
-          float pc = (tripod2.x - tripod1.x) * (tripod3.y - tripod1.y)
-                     - (tripod3.x - tripod1.x) * (tripod2.y - tripod1.y);
-          float pd = -(pa * tripod1.x + pb * tripod1.y + pc * tripod1.z);
-
-          float ps = sqrt(pa * pa + pb * pb + pc * pc);
-          pa /= ps;
-          pb /= ps;
-          pc /= ps;
-          pd /= ps;
-
-          float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
-
-          // TODO: Why writing to a variable that's never read? Maybe it should be used afterwards?
-          pointProj = pointSel;
-          pointProj.x -= pa * pd2;
-          pointProj.y -= pb * pd2;
-          pointProj.z -= pc * pd2;
-
-          float s = 1;
-          if (iterCount >= 5) {
-            s = 1 - 1.8f * fabs(pd2) / sqrt(calcPointDistance(pointSel));
-          }
-
-          coeff.x = s * pa;
-          coeff.y = s * pb;
-          coeff.z = s * pc;
-          coeff.intensity = s * pd2;
-
-          if (s > 0.1 && pd2 != 0) {
-            _laserCloudOri->push_back(_surfPointsFlat->points[i]);
-            _coeffSel->push_back(coeff);
-          }
+          // Start
+          coeff = Solvejacobian(pointSel,i,iterCount,num_pt);
         }
       }
 
@@ -871,6 +735,7 @@ void LaserOdometry::process()
   lastCornerCloudSize = _lastCornerCloud->points.size();
   lastSurfaceCloudSize = _lastSurfaceCloud->points.size();
 
+  // Setup KDtree
   if (lastCornerCloudSize > 10 && lastSurfaceCloudSize > 100) {
     _lastCornerKDTree.setInputCloud(_lastCornerCloud);
     _lastSurfaceKDTree.setInputCloud(_lastSurfaceCloud);
@@ -913,6 +778,184 @@ void LaserOdometry::publishResult()
     publishCloudMsg(_pubLaserCloudSurfLast, *_lastSurfaceCloud, sweepTime, "/camera");
     publishCloudMsg(_pubLaserCloudFullRes, *_laserCloud, sweepTime, "/camera");
   }
+}
+
+std::vector<int> LaserOdometry::Findnearest(const pcl::PointXYZI& pointSel,const int closestPointInd,const int closestPointScan,const int FeatPointsNum,const int num_pt)
+{
+  std::vector<int> result(num_pt,-1);
+  float pointSqDis;
+  std::vector<float> minPointSqDis(num_pt,25.0);
+  for (int j = closestPointInd + 1; j < FeatPointsNum; j++) {
+    // Find nearest index
+    if (num_pt == 1){ // num_pt = 1 means edge feature
+      if (int(_lastCornerCloud->points[j].intensity) > closestPointScan + 2.5) {
+        break;
+      }
+      pointSqDis = calcSquaredDiff(_lastCornerCloud->points[j], pointSel);
+      if (int(_lastCornerCloud->points[j].intensity) > closestPointScan) { // For edge features, only consider nearest point in larger scan
+        if (pointSqDis < minPointSqDis[0]) {
+          minPointSqDis[0] = pointSqDis;
+          result[0] = j;
+        }
+      }
+    } else{           // num_pt = 2 means plane
+      if (int(_lastSurfaceCloud->points[j].intensity) > closestPointScan + 2.5) {
+        break;
+      }
+      pointSqDis = calcSquaredDiff(_lastSurfaceCloud->points[j], pointSel);
+      if (int(_lastSurfaceCloud->points[j].intensity) <= closestPointScan) { // For plane features, consider nearest points one in larger scan one in smaller scan
+        if (pointSqDis < minPointSqDis[0]) {
+          minPointSqDis[0] = pointSqDis;
+          result[0] = j;
+        }
+      } else {
+        if (pointSqDis < minPointSqDis[1]) {
+          minPointSqDis[1] = pointSqDis;
+          result[1] = j;
+        }
+      }
+    }
+  }
+  // Search for nearest feature points in points before.
+  for (int j = closestPointInd - 1; j >= 0; j--) {
+
+    if (num_pt == 1){ // num_pt = 1 means edge feature
+      if (int(_lastCornerCloud->points[j].intensity) < closestPointScan - 2.5) {
+        break;
+      }
+
+      pointSqDis = calcSquaredDiff(_lastCornerCloud->points[j], pointSel);
+      if (int(_lastCornerCloud->points[j].intensity) < closestPointScan) { //?????
+        if (pointSqDis < minPointSqDis[0]) {
+          minPointSqDis[0] = pointSqDis;
+          result[0] = j;
+        }
+      }
+    } else{           // num_pt = 2 means plane
+      if (int(_lastSurfaceCloud->points[j].intensity) < closestPointScan - 2.5) {
+        break;
+      }
+
+      pointSqDis = calcSquaredDiff(_lastSurfaceCloud->points[j], pointSel);
+      if (int(_lastSurfaceCloud->points[j].intensity) >= closestPointScan) {
+        if (pointSqDis < minPointSqDis[0]) {
+          minPointSqDis[0] = pointSqDis;
+          result[0] = j;
+        }
+      } else {
+        if (pointSqDis < minPointSqDis[1]) {
+          minPointSqDis[1] = pointSqDis;
+          result[1] = j;
+        }
+      }
+    }
+  }
+  return result;
+        // End
+}
+pcl::PointXYZI LaserOdometry::Solvejacobian(const pcl::PointXYZI& pointSel, const int index,const size_t iterCount,const int num_pt){
+  pcl::PointXYZI result;
+  pcl::PointXYZI tripod1, tripod2, tripod3;
+  if (num_pt == 1){ // Edge
+    tripod1 = _lastCornerCloud->points[_pointSearchCornerInd1[index]];
+    tripod2 = _lastCornerCloud->points[_pointSearchCornerInd2[index]];
+
+    float x0 = pointSel.x;
+    float y0 = pointSel.y;
+    float z0 = pointSel.z;
+    float x1 = tripod1.x;
+    float y1 = tripod1.y;
+    float z1 = tripod1.z;
+    float x2 = tripod2.x;
+    float y2 = tripod2.y;
+    float z2 = tripod2.z;
+
+    float a012 = sqrt(((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
+                      * ((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
+                      + ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))
+                        * ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))
+                      + ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1))
+                        * ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1)));
+
+    float l12 = sqrt((x1 - x2)*(x1 - x2) + (y1 - y2)*(y1 - y2) + (z1 - z2)*(z1 - z2));
+
+    float la = ((y1 - y2)*((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
+                + (z1 - z2)*((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))) / a012 / l12;
+
+    float lb = -((x1 - x2)*((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
+                 - (z1 - z2)*((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1))) / a012 / l12;
+
+    float lc = -((x1 - x2)*((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))
+                 + (y1 - y2)*((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1))) / a012 / l12;
+
+    float ld2 = a012 / l12;
+
+    // s is the weight, ld2 increases s decreases
+    float s = 1;
+    if (iterCount >= 5) {
+      s = 1 - 1.8f * fabs(ld2);
+    }
+
+    result.x = s * la;
+    result.y = s * lb;
+    result.z = s * lc;
+    result.intensity = s * ld2;
+
+    if (s > 0.1 && ld2 != 0) {
+      _laserCloudOri->push_back(_cornerPointsSharp->points[index]);
+      _coeffSel->push_back(result);
+    }
+
+  }else{            // Plane
+    tripod1 = _lastSurfaceCloud->points[_pointSearchSurfInd1[index]];
+    tripod2 = _lastSurfaceCloud->points[_pointSearchSurfInd2[index]];
+    tripod3 = _lastSurfaceCloud->points[_pointSearchSurfInd3[index]];
+
+    float x0 = pointSel.x;
+    float y0 = pointSel.y;
+    float z0 = pointSel.z;
+    float x1 = tripod1.x;
+    float y1 = tripod1.y;
+    float z1 = tripod1.z;
+    float x2 = tripod2.x;
+    float y2 = tripod2.y;
+    float z2 = tripod2.z;
+    float x3 = tripod3.x;
+    float y3 = tripod3.y;
+    float z3 = tripod3.z;
+
+    float pa = (y2 - y1) * (z3 - z1)
+               - (y3 - y1) * (z2 - z1);
+    float pb = (z2 - z1) * (x3 - x1)
+               - (z3 - z1) * (x2 - x1);
+    float pc = (x2 - x1) * (y3 - y1)
+               - (x3 - x1) * (y2 - y1);
+    float pd = -(pa * x1 + pb * y1 + pc * z1);
+
+    float ps = sqrt(pa * pa + pb * pb + pc * pc);
+    pa /= ps;
+    pb /= ps;
+    pc /= ps;
+    pd /= ps;
+
+    float pd2 = pa * x0 + pb * y0 + pc * z0 + pd;
+
+    float s = 1;
+    if (iterCount >= 5) {
+      s = 1 - 1.8f * fabs(pd2) / sqrt(calcPointDistance(pointSel));
+    }
+
+    result.x = s * pa;
+    result.y = s * pb;
+    result.z = s * pc;
+    result.intensity = s * pd2;
+
+    if (s > 0.1 && pd2 != 0) {
+      _laserCloudOri->push_back(_surfPointsFlat->points[index]);
+      _coeffSel->push_back(result);
+    }
+  }
+  return result;
 }
 
 } // end namespace loam
