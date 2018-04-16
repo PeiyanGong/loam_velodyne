@@ -48,6 +48,82 @@ using std::atan2;
 using std::pow;
 
 
+// Several Handlers to deal with the subscribed message
+
+void LaserMapping::laserCloudCornerLastHandler(const sensor_msgs::PointCloud2ConstPtr& cornerPointsLastMsg)
+{
+  _timeLaserCloudCornerLast = cornerPointsLastMsg->header.stamp;
+
+  _laserCloudCornerLast->clear();
+  pcl::fromROSMsg(*cornerPointsLastMsg, *_laserCloudCornerLast);
+
+  _newLaserCloudCornerLast = true;
+}
+
+
+
+void LaserMapping::laserCloudSurfLastHandler(const sensor_msgs::PointCloud2ConstPtr& surfacePointsLastMsg)
+{
+  _timeLaserCloudSurfLast = surfacePointsLastMsg->header.stamp;
+
+  _laserCloudSurfLast->clear();
+  pcl::fromROSMsg(*surfacePointsLastMsg, *_laserCloudSurfLast);
+
+  _newLaserCloudSurfLast = true;
+}
+
+
+
+void LaserMapping::laserCloudFullResHandler(const sensor_msgs::PointCloud2ConstPtr& laserCloudFullResMsg)
+{
+  _timeLaserCloudFullRes = laserCloudFullResMsg->header.stamp;
+
+  _laserCloudFullRes->clear();
+  pcl::fromROSMsg(*laserCloudFullResMsg, *_laserCloudFullRes);
+
+  _newLaserCloudFullRes = true;
+}
+
+
+
+void LaserMapping::laserOdometryHandler(const nav_msgs::Odometry::ConstPtr& laserOdometry)
+{
+  _timeLaserOdometry = laserOdometry->header.stamp;
+
+  double roll, pitch, yaw;
+  geometry_msgs::Quaternion geoQuat = laserOdometry->pose.pose.orientation;
+  tf::Matrix3x3(tf::Quaternion(geoQuat.z, -geoQuat.x, -geoQuat.y, geoQuat.w)).getRPY(roll, pitch, yaw);
+
+  _transformSum.rot_x = -pitch;
+  _transformSum.rot_y = -yaw;
+  _transformSum.rot_z = roll;
+
+  _transformSum.pos.x() = float(laserOdometry->pose.pose.position.x);
+  _transformSum.pos.y() = float(laserOdometry->pose.pose.position.y);
+  _transformSum.pos.z() = float(laserOdometry->pose.pose.position.z);
+
+  _newLaserOdometry = true;
+}
+
+
+
+void LaserMapping::imuHandler(const sensor_msgs::Imu::ConstPtr& imuIn)
+{
+  double roll, pitch, yaw;
+  tf::Quaternion orientation;
+  tf::quaternionMsgToTF(imuIn->orientation, orientation);
+  tf::Matrix3x3(orientation).getRPY(roll, pitch, yaw);
+
+  IMUState2 newState;
+
+  newState.stamp = imuIn->header.stamp;
+  newState.roll = roll;
+  newState.pitch = pitch;
+
+  _imuHistory.push(newState);
+}
+
+
 LaserMapping::LaserMapping(const float& scanPeriod,
                            const size_t& maxIterations)
       : _scanPeriod(scanPeriod),
@@ -341,81 +417,6 @@ void LaserMapping::pointAssociateTobeMapped(const pcl::PointXYZI& pi, pcl::Point
 
 
 
-void LaserMapping::laserCloudCornerLastHandler(const sensor_msgs::PointCloud2ConstPtr& cornerPointsLastMsg)
-{
-  _timeLaserCloudCornerLast = cornerPointsLastMsg->header.stamp;
-
-  _laserCloudCornerLast->clear();
-  pcl::fromROSMsg(*cornerPointsLastMsg, *_laserCloudCornerLast);
-
-  _newLaserCloudCornerLast = true;
-}
-
-
-
-void LaserMapping::laserCloudSurfLastHandler(const sensor_msgs::PointCloud2ConstPtr& surfacePointsLastMsg)
-{
-  _timeLaserCloudSurfLast = surfacePointsLastMsg->header.stamp;
-
-  _laserCloudSurfLast->clear();
-  pcl::fromROSMsg(*surfacePointsLastMsg, *_laserCloudSurfLast);
-
-  _newLaserCloudSurfLast = true;
-}
-
-
-
-void LaserMapping::laserCloudFullResHandler(const sensor_msgs::PointCloud2ConstPtr& laserCloudFullResMsg)
-{
-  _timeLaserCloudFullRes = laserCloudFullResMsg->header.stamp;
-
-  _laserCloudFullRes->clear();
-  pcl::fromROSMsg(*laserCloudFullResMsg, *_laserCloudFullRes);
-
-  _newLaserCloudFullRes = true;
-}
-
-
-
-void LaserMapping::laserOdometryHandler(const nav_msgs::Odometry::ConstPtr& laserOdometry)
-{
-  _timeLaserOdometry = laserOdometry->header.stamp;
-
-  double roll, pitch, yaw;
-  geometry_msgs::Quaternion geoQuat = laserOdometry->pose.pose.orientation;
-  tf::Matrix3x3(tf::Quaternion(geoQuat.z, -geoQuat.x, -geoQuat.y, geoQuat.w)).getRPY(roll, pitch, yaw);
-
-  _transformSum.rot_x = -pitch;
-  _transformSum.rot_y = -yaw;
-  _transformSum.rot_z = roll;
-
-  _transformSum.pos.x() = float(laserOdometry->pose.pose.position.x);
-  _transformSum.pos.y() = float(laserOdometry->pose.pose.position.y);
-  _transformSum.pos.z() = float(laserOdometry->pose.pose.position.z);
-
-  _newLaserOdometry = true;
-}
-
-
-
-void LaserMapping::imuHandler(const sensor_msgs::Imu::ConstPtr& imuIn)
-{
-  double roll, pitch, yaw;
-  tf::Quaternion orientation;
-  tf::quaternionMsgToTF(imuIn->orientation, orientation);
-  tf::Matrix3x3(orientation).getRPY(roll, pitch, yaw);
-
-  IMUState2 newState;
-
-  newState.stamp = imuIn->header.stamp;
-  newState.roll = roll;
-  newState.pitch = pitch;
-
-  _imuHistory.push(newState);
-}
-
-
-
 void LaserMapping::spin()
 {
   ros::Rate rate(100);
@@ -433,38 +434,25 @@ void LaserMapping::spin()
 }
 
 
-void LaserMapping::reset()
+void LaserMapping::process()
 {
+  // waiting for new messages
+  if (!(_newLaserCloudCornerLast && _newLaserCloudSurfLast &&
+         _newLaserCloudFullRes && _newLaserOdometry &&
+         fabs((_timeLaserCloudCornerLast - _timeLaserOdometry).toSec()) < 0.005 &&
+         fabs((_timeLaserCloudSurfLast - _timeLaserOdometry).toSec()) < 0.005 &&
+         fabs((_timeLaserCloudFullRes - _timeLaserOdometry).toSec()) < 0.005)) {
+    
+    return;
+  }
+
+  // reset all the flags
   _newLaserCloudCornerLast = false;
   _newLaserCloudSurfLast = false;
   _newLaserCloudFullRes = false;
   _newLaserOdometry = false;
-}
 
 
-
-bool LaserMapping::hasNewData()
-{
-  return _newLaserCloudCornerLast && _newLaserCloudSurfLast &&
-         _newLaserCloudFullRes && _newLaserOdometry &&
-         fabs((_timeLaserCloudCornerLast - _timeLaserOdometry).toSec()) < 0.005 &&
-         fabs((_timeLaserCloudSurfLast - _timeLaserOdometry).toSec()) < 0.005 &&
-         fabs((_timeLaserCloudFullRes - _timeLaserOdometry).toSec()) < 0.005;
-}
-
-
-
-void LaserMapping::process()
-{
-  if (!hasNewData()) {
-    // waiting for new data to arrive...
-    return;
-  }
-
-  // reset flags, etc.
-  reset();
-
-  // skip some frames?!?
   _frameCount++;
   if (_frameCount < _stackFrameNum) {
     return;
@@ -503,95 +491,6 @@ void LaserMapping::process()
   if (_transformTobeMapped.pos.y() + 25.0 < 0) centerCubeJ--;
   if (_transformTobeMapped.pos.z() + 25.0 < 0) centerCubeK--;
 
-  while (centerCubeI < 3) {
-    for (int j = 0; j < _laserCloudHeight; j++) {
-      for (int k = 0; k < _laserCloudDepth; k++) {
-      for (int i = _laserCloudWidth - 1; i >= 1; i--) {
-        const size_t indexA = toIndex(i, j, k);
-        const size_t indexB = toIndex(i-1, j, k);
-        std::swap( _laserCloudCornerArray[indexA], _laserCloudCornerArray[indexB] );
-        std::swap( _laserCloudSurfArray[indexA],   _laserCloudSurfArray[indexB]);
-        }
-      }
-    }
-    centerCubeI++;
-    _laserCloudCenWidth++;
-  }
-
-  while (centerCubeI >= _laserCloudWidth - 3) {
-    for (int j = 0; j < _laserCloudHeight; j++) {
-      for (int k = 0; k < _laserCloudDepth; k++) {
-       for (int i = 0; i < _laserCloudWidth - 1; i++) {
-         const size_t indexA = toIndex(i, j, k);
-         const size_t indexB = toIndex(i+1, j, k);
-         std::swap( _laserCloudCornerArray[indexA], _laserCloudCornerArray[indexB] );
-         std::swap( _laserCloudSurfArray[indexA],   _laserCloudSurfArray[indexB]);
-        }
-      }
-    }
-    centerCubeI--;
-    _laserCloudCenWidth--;
-  }
-
-  while (centerCubeJ < 3) {
-    for (int i = 0; i < _laserCloudWidth; i++) {
-      for (int k = 0; k < _laserCloudDepth; k++) {
-        for (int j = _laserCloudHeight - 1; j >= 1; j--) {
-          const size_t indexA = toIndex(i, j, k);
-          const size_t indexB = toIndex(i, j-1, k);
-          std::swap( _laserCloudCornerArray[indexA], _laserCloudCornerArray[indexB] );
-          std::swap( _laserCloudSurfArray[indexA],   _laserCloudSurfArray[indexB]);
-        }
-      }
-    }
-    centerCubeJ++;
-    _laserCloudCenHeight++;
-  }
-
-  while (centerCubeJ >= _laserCloudHeight - 3) {
-    for (int i = 0; i < _laserCloudWidth; i++) {
-      for (int k = 0; k < _laserCloudDepth; k++) {
-        for (int j = 0; j < _laserCloudHeight - 1; j++) {
-          const size_t indexA = toIndex(i, j, k);
-          const size_t indexB = toIndex(i, j+1, k);
-          std::swap( _laserCloudCornerArray[indexA], _laserCloudCornerArray[indexB] );
-          std::swap( _laserCloudSurfArray[indexA],   _laserCloudSurfArray[indexB]);
-        }
-      }
-    }
-    centerCubeJ--;
-    _laserCloudCenHeight--;
-  }
-
-  while (centerCubeK < 3) {
-    for (int i = 0; i < _laserCloudWidth; i++) {
-      for (int j = 0; j < _laserCloudHeight; j++) {
-        for (int k = _laserCloudDepth - 1; k >= 1; k--) {
-          const size_t indexA = toIndex(i, j, k);
-          const size_t indexB = toIndex(i, j, k-1);
-          std::swap( _laserCloudCornerArray[indexA], _laserCloudCornerArray[indexB] );
-          std::swap( _laserCloudSurfArray[indexA],   _laserCloudSurfArray[indexB]);
-        }
-      }
-    }
-    centerCubeK++;
-    _laserCloudCenDepth++;
-  }
-
-  while (centerCubeK >= _laserCloudDepth - 3) {
-    for (int i = 0; i < _laserCloudWidth; i++) {
-      for (int j = 0; j < _laserCloudHeight; j++) {
-        for (int k = 0; k < _laserCloudDepth - 1; k++) {
-          const size_t indexA = toIndex(i, j, k);
-          const size_t indexB = toIndex(i, j, k+1);
-          std::swap( _laserCloudCornerArray[indexA], _laserCloudCornerArray[indexB] );
-          std::swap( _laserCloudSurfArray[indexA],   _laserCloudSurfArray[indexB]);
-        }
-      }
-    }
-    centerCubeK--;
-    _laserCloudCenDepth--;
-  }
 
   _laserCloudValidInd.clear();
   _laserCloudSurroundInd.clear();
@@ -722,6 +621,7 @@ void LaserMapping::process()
     }
   }
 
+
   // down size all valid (within field of view) feature cube clouds
   for (int i = 0; i < laserCloudValidNum; i++) {
     size_t ind = _laserCloudValidInd[i];
@@ -743,7 +643,6 @@ void LaserMapping::process()
   // publish result
   publishResult();
 }
-
 
 
 void LaserMapping::optimizeTransformTobeMapped()
@@ -823,17 +722,17 @@ void LaserMapping::optimizeTransformTobeMapped()
         matD1 = esolver.eigenvalues().real();
         matV1 = esolver.eigenvectors().real();
 
-        if (matD1(0, 0) > 3 * matD1(0, 1)) {
+        if (matD1(0, 2) > 3 * matD1(0, 1)) {
 
           float x0 = pointSel.x;
           float y0 = pointSel.y;
           float z0 = pointSel.z;
-          float x1 = vc.x() + 0.1 * matV1(0, 0);
-          float y1 = vc.y() + 0.1 * matV1(0, 1);
-          float z1 = vc.z() + 0.1 * matV1(0, 2);
-          float x2 = vc.x() - 0.1 * matV1(0, 0);
-          float y2 = vc.y() - 0.1 * matV1(0, 1);
-          float z2 = vc.z() - 0.1 * matV1(0, 2);
+          float x1 = vc.x() + 0.1 * matV1(0, 2);
+          float y1 = vc.y() + 0.1 * matV1(1, 2);
+          float z1 = vc.z() + 0.1 * matV1(2, 2);
+          float x2 = vc.x() - 0.1 * matV1(0, 2);
+          float y2 = vc.y() - 0.1 * matV1(1, 2);
+          float z2 = vc.z() - 0.1 * matV1(2, 2);
 
           float a012 = sqrt(((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
                             * ((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1))
@@ -855,7 +754,6 @@ void LaserMapping::optimizeTransformTobeMapped()
 
           float ld2 = a012 / l12;
 
-          // TODO: Why writing to a variable that's never read? Maybe it should be used afterwards?
           pointProj = pointSel;
           pointProj.x -= la * ld2;
           pointProj.y -= lb * ld2;
@@ -912,8 +810,6 @@ void LaserMapping::optimizeTransformTobeMapped()
 
         if (planeValid) {
           float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
-
-          // TODO: Why writing to a variable that's never read? Maybe it should be used afterwards?
           pointProj = pointSel;
           pointProj.x -= pa * pd2;
           pointProj.y -= pb * pd2;
@@ -997,7 +893,7 @@ void LaserMapping::optimizeTransformTobeMapped()
 
       isDegenerate = false;
       float eignThre[6] = {100, 100, 100, 100, 100, 100};
-      for (int i = 5; i >= 0; i--) {
+      for (int i = 0; i < 6; i++) {
         if (matE(0, i) < eignThre[i]) {
           for (int j = 0; j < 6; j++) {
             matV2(i, j) = 0;
@@ -1036,7 +932,6 @@ void LaserMapping::optimizeTransformTobeMapped()
 
   transformUpdate();
 }
-
 
 
 void LaserMapping::publishResult()
