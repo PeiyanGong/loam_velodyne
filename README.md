@@ -1,11 +1,12 @@
-![Screenshot](/capture.bmp)
-Sample map built from [nsh_indoor_outdoor.bag](http://www.frc.ri.cmu.edu/~jizhang03/Datasets/nsh_indoor_outdoor.bag) (opened with [ccViewer](http://www.danielgm.net/cc/))
+![Screenshot](/mapping.jpeg)
 
-:white_check_mark: Tested with ROS Indigo and Velodyne VLP16. [(Screencast)](https://youtu.be/o1cLXY-Es54)
+:white_check_mark: Tested with ROS Kinetic Running on Ubuntu 16.04, Velodyne VLP16. [(Screencast)](https://youtu.be/o1cLXY-Es54)
 
 All sources were taken from [ROS documentation](http://docs.ros.org/indigo/api/loam_velodyne/html/files.html)
 
-Ask questions [here](https://github.com/laboshinl/loam_velodyne/issues/3).
+This is a reimplementation of the original paper [LOAM](http://www.roboticsproceedings.org/rss10/p07.pdf)
+
+[This](https://github.com/laboshinl/loam_velodyne) is the main reference of this project.
 
 How to build with catkin:
 
