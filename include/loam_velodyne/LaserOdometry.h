@@ -140,7 +140,12 @@ protected:
 
   /** \brief Publish the current result via the respective topics. */
   void publishResult();
+  std::vector<int> Findnearest(const pcl::PointXYZI& pointSel, const int closestPointInd,
+                  const int closestPointScan,const int surfPointsFlatNum,const int num_pt);
 
+  pcl::PointXYZI Solvejacobian(const pcl::PointXYZI& pointSel, const int index,
+                  const size_t iterCount,const int num_pt);
+  
 private:
   float _scanPeriod;       ///< time per scan
   uint16_t _ioRatio;       ///< ratio of input to output frames

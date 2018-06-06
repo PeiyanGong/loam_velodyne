@@ -1,17 +1,20 @@
-![Screenshot](/capture.bmp)
-Sample map built from [nsh_indoor_outdoor.bag](http://www.frc.ri.cmu.edu/~jizhang03/Datasets/nsh_indoor_outdoor.bag) (opened with [ccViewer](http://www.danielgm.net/cc/))
+![Screenshot](/kitti.jpg)
 
-:white_check_mark: Tested with ROS Indigo and Velodyne VLP16. [(Screencast)](https://youtu.be/o1cLXY-Es54)
+Sample map built from [Kitti Raw Data Sequence 05](http://kitti.is.tue.mpg.de/kitti/raw_data/2011_09_30_drive_0018/2011_09_30_drive_0018_sync.zip)
+
+:white_check_mark: Tested with ROS Kinetic Running on Ubuntu 16.04, Velodyne VLP16.
 
 All sources were taken from [ROS documentation](http://docs.ros.org/indigo/api/loam_velodyne/html/files.html)
 
-Ask questions [here](https://github.com/laboshinl/loam_velodyne/issues/3).
+This is a reimplementation of the original paper [LOAM](http://www.roboticsproceedings.org/rss10/p07.pdf)
+
+[This](https://github.com/laboshinl/loam_velodyne) is the main reference of this project. The project is for study purpose only.
 
 How to build with catkin:
 
 ```
 $ cd ~/catkin_ws/src/
-$ git clone https://github.com/laboshinl/loam_velodyne.git
+$ git clone https://github.com/umrichen/loam_velodyne.git
 $ cd ~/catkin_ws
 $ catkin_make -DCMAKE_BUILD_TYPE=Release 
 $ source ~/catkin_ws/devel/setup.bash
@@ -22,17 +25,19 @@ Running:
 roslaunch loam_velodyne loam_velodyne.launch
 ```
 
-In second terminal play sample velodyne data from [VLP16 rosbag](https://db.tt/t2r39mjZ):
+Then choose one of the following:
+
+In second terminal play sample velodyne data from rosbag, for example [VLP16 rosbag](https://db.tt/t2r39mjZ):
 ```
-rosbag play ~/Downloads/velodyne.bag 
+rosbag play /path/to/velodyne.bag 
 ```
 
-Or read from velodyne [VLP16 sample pcap](https://midas3.kitware.com/midas/folder/12979):
+Or read from velodyne .pcap file, for example [VLP16 sample pcap](https://midas3.kitware.com/midas/folder/12979):
 ```
-roslaunch velodyne_pointcloud VLP16_points.launch pcap:="/home/laboshinl/Downloads/velodyne.pcap"
+roslaunch velodyne_pointcloud VLP16_points.launch pcap:="/full/path/to/velodyne.pcap"
 ```
+Note: using full path for pcap file is required.
 
 ---
-[Quantifying Aerial LiDAR Accuracy of LOAM for Civil Engineering Applications.](https://ceen.et.byu.edu/sites/default/files/snrprojects/wolfe_derek.pdf) Derek Anthony Wolfe
 
-[ROS & Loam_velodyne](https://ishiguro440.wordpress.com/2016/04/05/%E5%82%99%E5%BF%98%E9%8C%B2%E3%80%80ros-loam_velodyne/) 
+Note on converting Kitti dataset: in kitti2bag/bin/kitti2bag, remove save_camera_data() function call to avoid error in saving camera frames.

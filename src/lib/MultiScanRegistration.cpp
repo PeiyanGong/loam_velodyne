@@ -61,12 +61,10 @@ void MultiScanMapper::set(const float &lowerBound,
 
 
 
-int MultiScanMapper::getRingForAngle(const float& angle) {
-  return int(((angle * 180 / M_PI) - _lowerBound) * _factor + 0.5);
+int MultiScanMapper::getScanID(const pcl::PointXYZI& point) {
+  float upAngle = std::atan(point.y / std::sqrt(point.x * point.x + point.z * point.z));
+  return int(((upAngle * 180 / M_PI) - _lowerBound) * _factor + 0.5);
 }
-
-
-
 
 
 
@@ -166,26 +164,27 @@ void MultiScanRegistration::process(const pcl::PointCloud<pcl::PointXYZ>& laserC
   float startOri = -std::atan2(laserCloudIn[0].y, laserCloudIn[0].x);
   float endOri = -std::atan2(laserCloudIn[cloudSize - 1].y,
                              laserCloudIn[cloudSize - 1].x) + 2 * float(M_PI);
+  
+  // Range for a sweep is [PI,3PI]
   if (endOri - startOri > 3 * M_PI) {
     endOri -= 2 * M_PI;
   } else if (endOri - startOri < M_PI) {
     endOri += 2 * M_PI;
   }
 
-  bool halfPassed = false;
+  bool halfProcessed = false;
   pcl::PointXYZI point;
   std::vector<pcl::PointCloud<pcl::PointXYZI> > laserCloudScans(_scanMapper.getNumberOfScanRings());
 
   // extract valid points from input cloud
   for (int i = 0; i < cloudSize; i++) {
+    // Change coordinate system to y-axis up
     point.x = laserCloudIn[i].y;
     point.y = laserCloudIn[i].z;
     point.z = laserCloudIn[i].x;
 
     // skip NaN and INF valued points
-    if (!pcl_isfinite(point.x) ||
-        !pcl_isfinite(point.y) ||
-        !pcl_isfinite(point.z)) {
+    if (!pcl_isfinite(point.x) || !pcl_isfinite(point.y) || !pcl_isfinite(point.z)) {
       continue;
     }
 
@@ -195,15 +194,14 @@ void MultiScanRegistration::process(const pcl::PointCloud<pcl::PointXYZ>& laserC
     }
 
     // calculate vertical point angle and scan ID
-    float angle = std::atan(point.y / std::sqrt(point.x * point.x + point.z * point.z));
-    int scanID = _scanMapper.getRingForAngle(angle);
+    int scanID = _scanMapper.getScanID(point);
     if (scanID >= _scanMapper.getNumberOfScanRings() || scanID < 0 ){
       continue;
     }
 
     // calculate horizontal point angle
     float ori = -std::atan2(point.x, point.z);
-    if (!halfPassed) {
+    if (!halfProcessed) {
       if (ori < startOri - M_PI / 2) {
         ori += 2 * M_PI;
       } else if (ori > startOri + M_PI * 3 / 2) {
@@ -211,7 +209,7 @@ void MultiScanRegistration::process(const pcl::PointCloud<pcl::PointXYZ>& laserC
       }
 
       if (ori - startOri > M_PI) {
-        halfPassed = true;
+        halfProcessed = true;
       }
     } else {
       ori += 2 * M_PI;
@@ -240,7 +238,6 @@ void MultiScanRegistration::process(const pcl::PointCloud<pcl::PointXYZ>& laserC
   cloudSize = 0;
   for (int i = 0; i < _scanMapper.getNumberOfScanRings(); i++) {
     _laserCloud += laserCloudScans[i];
-
     IndexRange range(cloudSize, 0);
     cloudSize += laserCloudScans[i].size();
     range.second = cloudSize > 0 ? cloudSize - 1 : 0;

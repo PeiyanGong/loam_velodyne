@@ -325,7 +325,60 @@ void ScanRegistration::interpolateIMUStateFor(const float &relTime,
   }
 }
 
+void ScanRegistration::extractRegionFeatures(const size_t& regionSize,
+                                             const size_t& scanStartIdx,
+                                             const size_t& scanEndIdx,
+                                             const size_t& regionStartIdx,
+                                             const size_t& regionEndIdx,
+                                             const pcl::PointCloud<pcl::PointXYZI>::Ptr& surfPointsLessFlatScan)
+{
+  // extract corner features
+  int pickedNum = 0;
+  for (size_t k = regionSize; k > 0 && pickedNum < _config.maxCornerLessSharp;) {
+    size_t idx = _regionSortIndices[--k];
+    size_t idInScan = idx - scanStartIdx;
+    size_t idInRegion = idx - regionStartIdx;
 
+    if (_scanNeighborPicked[idInScan] == 0 &&
+        _regionCurvature[idInRegion] > _config.surfaceCurvatureThreshold) {
+
+      pickedNum++;
+      if (pickedNum <= _config.maxCornerSharp) {
+        _regionLabel[idInRegion] = CORNER_SHARP;
+        _cornerPointsSharp.push_back(_laserCloud[idx]);
+      } else {
+        _regionLabel[idInRegion] = CORNER_LESS_SHARP;
+        _cornerPointsLessSharp.push_back(_laserCloud[idx]);
+      }
+      markAsPicked(idx, idInScan);
+    }
+  }
+
+  // extract flat surface features
+  pickedNum = 0;
+  for (int k = 0; k < regionSize; k++) {
+    size_t idx = _regionSortIndices[k];
+    size_t scanIdx = idx - scanStartIdx;
+    size_t regionIdx = idx - regionStartIdx;
+
+    if (_scanNeighborPicked[scanIdx] == 0 &&
+        _regionCurvature[regionIdx] < _config.surfaceCurvatureThreshold &&
+        pickedNum < _config.maxSurfaceFlat)
+    {
+        _regionLabel[regionIdx] = SURFACE_FLAT;
+        _surfacePointsFlat.push_back(_laserCloud[idx]);
+        pickedNum++;
+        markAsPicked(idx, scanIdx);
+    }
+  }
+
+  // extract less flat surface features
+  for (int k = 0; k < regionSize; k++) {
+    if (_regionLabel[k] <= SURFACE_LESS_FLAT) {
+      surfPointsLessFlatScan->push_back(_laserCloud[regionStartIdx + k]);
+    }
+  }
+}
 
 void ScanRegistration::extractFeatures(const uint16_t& beginIdx)
 {
@@ -341,80 +394,27 @@ void ScanRegistration::extractFeatures(const uint16_t& beginIdx)
       continue;
     }
 
-    // Quick&Dirty fix for relative point time calculation without IMU data
-    /*float scanSize = scanEndIdx - scanStartIdx + 1;
-    for (int j = scanStartIdx; j <= scanEndIdx; j++) {
-      _laserCloud[j].intensity = i + _scanPeriod * (j - scanStartIdx) / scanSize;
-    }*/
-
     // reset scan buffers
     setScanBuffersFor(scanStartIdx, scanEndIdx);
 
     // extract features from equally sized scan regions
     for (int j = 0; j < _config.nFeatureRegions; j++) {
-      size_t sp = ((scanStartIdx + _config.curvatureRegion) * (_config.nFeatureRegions - j)
+      size_t regionStartIdx = ((scanStartIdx + _config.curvatureRegion) * (_config.nFeatureRegions - j)
                    + (scanEndIdx - _config.curvatureRegion) * j) / _config.nFeatureRegions;
-      size_t ep = ((scanStartIdx + _config.curvatureRegion) * (_config.nFeatureRegions - 1 - j)
+      size_t regionEndIdx = ((scanStartIdx + _config.curvatureRegion) * (_config.nFeatureRegions - 1 - j)
                    + (scanEndIdx - _config.curvatureRegion) * (j + 1)) / _config.nFeatureRegions - 1;
 
       // skip empty regions
-      if (ep <= sp) {
+      if (regionEndIdx <= regionStartIdx) {
         continue;
       }
 
-      size_t regionSize = ep - sp + 1;
+      size_t regionSize = regionEndIdx - regionStartIdx + 1;
 
       // reset region buffers
-      setRegionBuffersFor(sp, ep);
+      setRegionBuffersFor(regionStartIdx, regionEndIdx);
 
-
-      // extract corner features
-      int largestPickedNum = 0;
-      for (size_t k = regionSize; k > 0 && largestPickedNum < _config.maxCornerLessSharp;) {
-        size_t idx = _regionSortIndices[--k];
-        size_t scanIdx = idx - scanStartIdx;
-        size_t regionIdx = idx - sp;
-
-        if (_scanNeighborPicked[scanIdx] == 0 &&
-            _regionCurvature[regionIdx] > _config.surfaceCurvatureThreshold) {
-
-          largestPickedNum++;
-          if (largestPickedNum <= _config.maxCornerSharp) {
-            _regionLabel[regionIdx] = CORNER_SHARP;
-            _cornerPointsSharp.push_back(_laserCloud[idx]);
-          } else {
-            _regionLabel[regionIdx] = CORNER_LESS_SHARP;
-          }
-          _cornerPointsLessSharp.push_back(_laserCloud[idx]);
-
-          markAsPicked(idx, scanIdx);
-        }
-      }
-
-      // extract flat surface features
-      int smallestPickedNum = 0;
-      for (int k = 0; k < regionSize && smallestPickedNum < _config.maxSurfaceFlat; k++) {
-        size_t idx = _regionSortIndices[k];
-        size_t scanIdx = idx - scanStartIdx;
-        size_t regionIdx = idx - sp;
-
-        if (_scanNeighborPicked[scanIdx] == 0 &&
-            _regionCurvature[regionIdx] < _config.surfaceCurvatureThreshold) {
-
-          smallestPickedNum++;
-          _regionLabel[regionIdx] = SURFACE_FLAT;
-          _surfacePointsFlat.push_back(_laserCloud[idx]);
-
-          markAsPicked(idx, scanIdx);
-        }
-      }
-
-      // extract less flat surface features
-      for (int k = 0; k < regionSize; k++) {
-        if (_regionLabel[k] <= SURFACE_LESS_FLAT) {
-          surfPointsLessFlatScan->push_back(_laserCloud[sp + k]);
-        }
-      }
+      extractRegionFeatures(regionSize, scanStartIdx, scanEndIdx, regionStartIdx, regionEndIdx, surfPointsLessFlatScan);
     }
 
     // down size less flat surface point cloud of current scan
@@ -525,7 +525,6 @@ void ScanRegistration::markAsPicked(const size_t& cloudIdx,
     if (calcSquaredDiff(_laserCloud[cloudIdx + i], _laserCloud[cloudIdx + i - 1]) > 0.05) {
       break;
     }
-
     _scanNeighborPicked[scanIdx + i] = 1;
   }
 
@@ -533,7 +532,6 @@ void ScanRegistration::markAsPicked(const size_t& cloudIdx,
     if (calcSquaredDiff(_laserCloud[cloudIdx - i], _laserCloud[cloudIdx - i + 1]) > 0.05) {
       break;
     }
-
     _scanNeighborPicked[scanIdx - i] = 1;
   }
 }
